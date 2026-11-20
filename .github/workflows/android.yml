@@ -1,5 +1,5 @@
 
-name: ElectricalCalc Pro Android APK
+name: ElectricalCalc Pro - Diagnose ZIP
 
 on:
   workflow_dispatch:
@@ -8,11 +8,11 @@ on:
       - main
 
 jobs:
-  build:
+  diagnose:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout project
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Java
@@ -21,29 +21,39 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Extract Android Project
+      - name: Inspect ZIP and Android project
         run: |
-          unzip -q electricalc-pro-nov-19-2026-9-52-55-pm.zip -d extracted
+          echo "===== ROOT FILES ====="
+          ls -lah
 
-      - name: Find Gradle Project
-        run: |
-          WRAPPER=$(find extracted -type f -name gradlew | head -n 1)
-          if [ -z "$WRAPPER" ]; then
-            echo "Gradle wrapper not found"
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: ZIP file not found"
             exit 1
           fi
-          ROOT=$(dirname "$WRAPPER")
-          echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
 
-      - name: Build Debug APK
-        run: |
-          cd "$PROJECT_ROOT"
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          echo "ZIP FOUND: $ZIP_FILE"
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ElectricalCalc-Pro-APK
-          path: extracted/**/build/outputs/apk/debug/*.apk
+          mkdir -p extracted
+          unzip -q "$ZIP_FILE" -d extracted
+
+          echo "===== PROJECT FILES ====="
+          find extracted -maxdepth 6 -type f \
+            \( -name 'gradlew' \
+            -o -name 'settings.gradle' \
+            -o -name 'settings.gradle.kts' \
+            -o -name 'build.gradle' \
+            -o -name 'build.gradle.kts' \
+            -o -name 'gradle-wrapper.properties' \) \
+            -print
+
+          echo "===== ANDROID GRADLE PLUGIN VERSION ====="
+          grep -R -n -E 'com.android.application|com.android.library|com.android.tools.build:gradle' extracted \
+            --include='*.gradle' \
+            --include='*.gradle.kts' || true
+
+          echo "===== PROJECT ROOT CANDIDATES ====="
+          find extracted -maxdepth 3 -type d -print
+          
           

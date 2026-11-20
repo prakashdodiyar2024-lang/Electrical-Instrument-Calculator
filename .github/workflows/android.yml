@@ -48,8 +48,10 @@ jobs:
           PROJECT_DIR=$(dirname "$SETTINGS")
           echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-          VERSION="8.9"
+          echo "Found project: $PROJECT_DIR"
+
           PROPS="$PROJECT_DIR/gradle/wrapper/gradle-wrapper.properties"
+          VERSION="8.9"
 
           if [ -f "$PROPS" ]; then
             DETECTED=$(sed -n \
@@ -77,10 +79,11 @@ jobs:
       - name: Generate Debug Keystore
         shell: bash
         run: |
-          PROJECT_DIR="${{ steps.project.outputs.project_dir }}"
-          KEYSTORE="$PROJECT_DIR/extracted/debug.keystore"
+          set -e
 
-          mkdir -p "$(dirname "$KEYSTORE")"
+          mkdir -p "$GITHUB_WORKSPACE/extracted"
+
+          KEYSTORE="$GITHUB_WORKSPACE/extracted/debug.keystore"
 
           if [ ! -f "$KEYSTORE" ]; then
             keytool -genkeypair -v \
@@ -93,6 +96,17 @@ jobs:
               -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
+
+          echo "Checking Keystore:"
+          ls -l "$KEYSTORE"
+
+          test -f "$KEYSTORE"
+
+      - name: Verify Keystore Before Build
+        shell: bash
+        run: |
+          test -f "$GITHUB_WORKSPACE/extracted/debug.keystore"
+          echo "Debug Keystore is available"
 
       - name: Build Updated APK
         shell: bash

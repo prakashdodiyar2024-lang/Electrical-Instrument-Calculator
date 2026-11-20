@@ -1,5 +1,5 @@
 
-name: ElectricalCalc Pro - Final Gradle Check
+name: ElectricalCalc Pro Android APK
 
 on:
   workflow_dispatch:
@@ -8,41 +8,50 @@ on:
       - main
 
 jobs:
-  diagnose:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout project
         uses: actions/checkout@v4
 
-      - name: Inspect Gradle Configuration
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Extract Android Project
         run: |
           mkdir -p extracted
           ZIP_FILE=$(find . -maxdepth 1 -name '*.zip' | head -n 1)
+          test -n "$ZIP_FILE"
           unzip -q "$ZIP_FILE" -d extracted
 
-          echo "===== GRADLE WRAPPER PROPERTIES ====="
-          cat extracted/gradle/wrapper/gradle-wrapper.properties
+      - name: Generate Gradle Wrapper
+        run: |
+          cd extracted
+          gradle wrapper --gradle-version 9.3.1
+          chmod +x gradlew
 
-          echo "===== ROOT BUILD GRADLE ====="
-          cat extracted/build.gradle.kts
+      - name: Build Debug APK
+        run: |
+          cd extracted
+          ./gradlew --no-daemon assembleDebug
 
-          echo "===== SETTINGS GRADLE ====="
-          cat extracted/settings.gradle.kts
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ElectricalCalc-Pro-APK
+          path: extracted/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          
 
-          echo "===== VERSION CATALOG ====="
-          if [ -f extracted/gradle/libs.versions.toml ]; then
-            cat extracted/gradle/libs.versions.toml
-          else
-            echo "No version catalog found"
-          fi
-
-          echo "===== WRAPPER DIRECTORY ====="
-          ls -lah extracted/gradle/wrapper/
-
-          echo "===== WRAPPER SCRIPTS ====="
-          find extracted -maxdepth 2 -type f \
-            \( -name 'gradlew' -o -name 'gradlew.bat' -o -name 'gradle-wrapper.jar' \) -print
             
 
           

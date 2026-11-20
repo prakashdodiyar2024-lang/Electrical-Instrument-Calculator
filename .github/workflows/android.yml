@@ -1,13 +1,15 @@
 
 
-
-name: Build ElectricalCalc Pro APK
+name: ElectricalCalc Pro - Updated APK Build
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -17,25 +19,48 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Extract Project ZIP Files
+        shell: bash
+        run: |
+          mkdir -p extracted
+
+          find . -type f -name "*.zip" \
+            -not -path "./.git/*" -print0 |
+          while IFS= read -r -d '' file; do
+            echo "Extracting: $file"
+            unzip -oq "$file" -d extracted
+          done
+
       - name: Find Android Project
         id: project
         shell: bash
         run: |
-          SETTINGS=$(find . -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
+          SETTINGS=$(find . -type f \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -not -path "./.git/*" \
+            -not -path "*/.gradle/*" \
+            -print -quit)
 
           if [ -z "$SETTINGS" ]; then
-            echo "ERROR: Android project settings.gradle not found"
+            echo "ERROR: Android project not found."
+            echo "Repository files:"
+            find . -maxdepth 4 -type f | head -200
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$SETTINGS")
           echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-          VERSION=8.9
+          echo "Android project found: $PROJECT_DIR"
+
           PROPS="$PROJECT_DIR/gradle/wrapper/gradle-wrapper.properties"
+          VERSION="8.9"
 
           if [ -f "$PROPS" ]; then
-            DETECTED=$(sed -n 's/.*gradle-\([0-9][0-9A-Za-z.-]*\)-\(bin\|all\)\.zip.*/\1/p' "$PROPS")
+            DETECTED=$(sed -n \
+              's/.*gradle-\([0-9][0-9A-Za-z.-]*\)-\(bin\|all\)\.zip.*/\1/p' \
+              "$PROPS" | head -1)
+
             if [ -n "$DETECTED" ]; then
               VERSION="$DETECTED"
             fi
@@ -54,7 +79,7 @@ jobs:
         with:
           gradle-version: ${{ steps.project.outputs.gradle_version }}
 
-      - name: Build Updated APK
+      - name: Build Updated Debug APK
         shell: bash
         run: |
           cd "${{ steps.project.outputs.project_dir }}"
@@ -70,5 +95,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ElectricalCalc-Pro-Updated-APK
-          path: '**/build/outputs/apk/debug/*.apk'
+          path: |
+            **/build/outputs/apk/debug/*.apk
           if-no-files-found: error

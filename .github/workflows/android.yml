@@ -1,0 +1,49 @@
+
+name: ElectricalCalc Pro Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Extract Android Project
+        run: |
+          unzip -q electricalc-pro-nov-19-2026-9-52-55-pm.zip -d extracted
+
+      - name: Find Gradle Project
+        run: |
+          WRAPPER=$(find extracted -type f -name gradlew | head -n 1)
+          if [ -z "$WRAPPER" ]; then
+            echo "Gradle wrapper not found"
+            exit 1
+          fi
+          ROOT=$(dirname "$WRAPPER")
+          echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
+
+      - name: Build Debug APK
+        run: |
+          cd "$PROJECT_ROOT"
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ElectricalCalc-Pro-APK
+          path: extracted/**/build/outputs/apk/debug/*.apk
+          

@@ -1,5 +1,5 @@
 
-name: ElectricalCalc Pro - Diagnose ZIP
+name: ElectricalCalc Pro - Final Gradle Check
 
 on:
   workflow_dispatch:
@@ -12,48 +12,38 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Inspect ZIP and Android project
+      - name: Inspect Gradle Configuration
         run: |
-          echo "===== ROOT FILES ====="
-          ls -lah
-
-          ZIP_FILE=$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: ZIP file not found"
-            exit 1
-          fi
-
-          echo "ZIP FOUND: $ZIP_FILE"
-
           mkdir -p extracted
+          ZIP_FILE=$(find . -maxdepth 1 -name '*.zip' | head -n 1)
           unzip -q "$ZIP_FILE" -d extracted
 
-          echo "===== PROJECT FILES ====="
-          find extracted -maxdepth 6 -type f \
-            \( -name 'gradlew' \
-            -o -name 'settings.gradle' \
-            -o -name 'settings.gradle.kts' \
-            -o -name 'build.gradle' \
-            -o -name 'build.gradle.kts' \
-            -o -name 'gradle-wrapper.properties' \) \
-            -print
+          echo "===== GRADLE WRAPPER PROPERTIES ====="
+          cat extracted/gradle/wrapper/gradle-wrapper.properties
 
-          echo "===== ANDROID GRADLE PLUGIN VERSION ====="
-          grep -R -n -E 'com.android.application|com.android.library|com.android.tools.build:gradle' extracted \
-            --include='*.gradle' \
-            --include='*.gradle.kts' || true
+          echo "===== ROOT BUILD GRADLE ====="
+          cat extracted/build.gradle.kts
 
-          echo "===== PROJECT ROOT CANDIDATES ====="
-          find extracted -maxdepth 3 -type d -print
+          echo "===== SETTINGS GRADLE ====="
+          cat extracted/settings.gradle.kts
+
+          echo "===== VERSION CATALOG ====="
+          if [ -f extracted/gradle/libs.versions.toml ]; then
+            cat extracted/gradle/libs.versions.toml
+          else
+            echo "No version catalog found"
+          fi
+
+          echo "===== WRAPPER DIRECTORY ====="
+          ls -lah extracted/gradle/wrapper/
+
+          echo "===== WRAPPER SCRIPTS ====="
+          find extracted -maxdepth 2 -type f \
+            \( -name 'gradlew' -o -name 'gradlew.bat' -o -name 'gradle-wrapper.jar' \) -print
+            
+
           
           

@@ -1,6 +1,6 @@
 
 
-name: ElectricalCalc Pro - Updated APK Build
+name: ElectricalCalc Pro APK Build
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Extract Project ZIP Files
+      - name: Extract ZIP Files
         shell: bash
         run: |
           mkdir -p extracted
@@ -27,7 +27,6 @@ jobs:
           find . -type f -name "*.zip" \
             -not -path "./.git/*" -print0 |
           while IFS= read -r -d '' file; do
-            echo "Extracting: $file"
             unzip -oq "$file" -d extracted
           done
 
@@ -42,19 +41,15 @@ jobs:
             -print -quit)
 
           if [ -z "$SETTINGS" ]; then
-            echo "ERROR: Android project not found."
-            echo "Repository files:"
-            find . -maxdepth 4 -type f | head -200
+            echo "Android project not found"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$SETTINGS")
           echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-          echo "Android project found: $PROJECT_DIR"
-
-          PROPS="$PROJECT_DIR/gradle/wrapper/gradle-wrapper.properties"
           VERSION="8.9"
+          PROPS="$PROJECT_DIR/gradle/wrapper/gradle-wrapper.properties"
 
           if [ -f "$PROPS" ]; then
             DETECTED=$(sed -n \
@@ -79,7 +74,27 @@ jobs:
         with:
           gradle-version: ${{ steps.project.outputs.gradle_version }}
 
-      - name: Build Updated Debug APK
+      - name: Generate Debug Keystore
+        shell: bash
+        run: |
+          PROJECT_DIR="${{ steps.project.outputs.project_dir }}"
+          KEYSTORE="$PROJECT_DIR/extracted/debug.keystore"
+
+          mkdir -p "$(dirname "$KEYSTORE")"
+
+          if [ ! -f "$KEYSTORE" ]; then
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Build Updated APK
         shell: bash
         run: |
           cd "${{ steps.project.outputs.project_dir }}"
@@ -95,6 +110,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ElectricalCalc-Pro-Updated-APK
-          path: |
-            **/build/outputs/apk/debug/*.apk
+          path: '**/build/outputs/apk/debug/*.apk'
           if-no-files-found: error

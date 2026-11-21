@@ -234,72 +234,130 @@ jobs:
         run: |
           set -e
 
+
+name: ElectricalCalc Pro APK Builder
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ElectricalCalc Pro
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Find and Extract Project ZIP
+        id: project
+        shell: bash
+        run: |
+          set -e
+
+          ZIP=$(find . -maxdepth 2 -type f \
+            -iname '*nov-21*.zip' | head -n 1)
+
+          if [ -z "$ZIP" ]; then
+            ZIP=$(find . -maxdepth 2 -type f \
+              -iname '*.zip' | sort | tail -n 1)
+          fi
+
+          if [ -z "$ZIP" ]; then
+            echo "::error::Project ZIP not found"
+            exit 1
+          fi
+
+          echo "ZIP selected: $ZIP"
+
+          mkdir -p "$RUNNER_TEMP/project"
+          unzip -q "$ZIP" -d "$RUNNER_TEMP/project"
+
+          DIR="$RUNNER_TEMP/project"
+
+          if [ ! -f "$DIR/settings.gradle.kts" ]; then
+            echo "::error::settings.gradle.kts missing"
+            exit 1
+          fi
+
+          if [ ! -f "$DIR/app/build.gradle.kts" ]; then
+            echo "::error::app/build.gradle.kts missing"
+            exit 1
+          fi
+
+          echo "project_dir=$DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Install Android SDK
+        run: |
+          set -e
+
           SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
-            -type f -name sdkmanager | head -n 1)
+            -name sdkmanager -type f | head -n 1)
 
           if [ -z "$SDKMANAGER" ]; then
             echo "::error::SDK Manager not found"
             exit 1
           fi
 
-          yes | "$SDKMANAGER" \
-            --sdk_root="$ANDROID_HOME" --licenses || true
-
           "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
+            --install \
             "platform-tools" \
-            "platforms;android-36.1" \
-            "build-tools;36.1.0"
+            "platforms;android-36" \
+            "build-tools;36.0.0"
 
       - name: Create Debug Keystore
         working-directory: ${{ steps.project.outputs.project_dir }}
         run: |
-          if [ ! -f debug.keystore ]; then
-            keytool -genkeypair -v \
-              -keystore debug.keystore \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
+          keytool -genkeypair -v \
+            -keystore debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
 
       - name: Run Unit Tests
-        id: tests
         continue-on-error: true
         working-directory: ${{ steps.project.outputs.project_dir }}
         run: |
           gradle :app:testDebugUnitTest \
-            --no-daemon \
-            --no-configuration-cache \
-            --stacktrace
+            --no-daemon --stacktrace
 
-      - name: Build Debug APK
+      - name: Build APK
         working-directory: ${{ steps.project.outputs.project_dir }}
         run: |
           gradle :app:assembleDebug \
-            --no-daemon \
-            --no-configuration-cache \
-            --stacktrace
+            --no-daemon --stacktrace
 
       - name: Verify APK
         working-directory: ${{ steps.project.outputs.project_dir }}
         run: |
-          APK="app/build/outputs/apk/debug/app-debug.apk"
-          test -f "$APK"
-          ls -lh "$APK"
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ElectricalCalc-Pro-100-Calculators-APK
+          name: ElectricalCalc-Pro-APK
           path: ${{ steps.project.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
-
-      - name: Test Result
-        if: always()
-        run: |
-          echo "Unit test result: ${{ steps.tests.outcome }}"
-          echo "APK build is handled separately."

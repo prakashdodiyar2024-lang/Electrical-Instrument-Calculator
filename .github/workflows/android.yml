@@ -1,104 +1,5 @@
 
-
-name: 
-name: ElectricalCalc Pro - Build APK
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-jobs:
-  build:
-    name: Extract, Test and Build APK
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Find and Extract Latest ZIP
-        id: project
-        shell: bash
-        run: |
-          set -e
-
-          ZIP_FILE=$(find . -maxdepth 3 -type f \
-            -iname '*nov-21*.zip' | sort | tail -n 1)
-
-          if [ -z "$ZIP_FILE" ]; then
-            ZIP_FILE=$(find . -maxdepth 3 -type f \
-              -iname 'electricalc-pro*.zip' | sort | tail -n 1)
-          fi
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "::error::ElectricalCalc Pro ZIP file not found"
-            exit 1
-          fi
-
-          echo "Selected ZIP: $ZIP_FILE"
-
-          EXTRACT_DIR="$RUNNER_TEMP/electricalcalc_source"
-          mkdir -p "$EXTRACT_DIR"
-
-          unzip -q "$ZIP_FILE" -d "$EXTRACT_DIR"
-
-          SETTINGS=$(find "$EXTRACT_DIR" -maxdepth 8 \
-            -type f \( -name settings.gradle.kts \
-            -o -name settings.gradle \) | head -n 1)
-
-          if [ -z "$SETTINGS" ]; then
-            echo "::error::Gradle settings file missing inside ZIP"
-            exit 1
-          fi
-
-          PROJECT_DIR=$(dirname "$SETTINGS")
-
-          if [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ] && \
-             [ ! -f "$PROJECT_DIR/app/build.gradle" ]; then
-            echo "::error::Android app module missing"
-            exit 1
-          fi
-
-          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
-
-          echo "Android project found:"
-          echo "$PROJECT_DIR"
-
-          ls -la "$PROJECT_DIR"
-
-      - name: Setup JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Setup Android SDK
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          test -d "$ANDROID_HOME/platform-tools"
-
-      - name: Accept Android Licenses
-        shell: bash
-        run: |
-          set +o pipefail
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          if [ -x "$SDKMANAGER" ]; then
-            yes | "$SDKMANAGER" --licenses || true
-          fi
-
-      - name: Setup Gradle 9.3.1
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.3.1'
-
-      - name: Prepare Debug Keystore
-        working-directory: ${{ steps.project.outputs.project_dir }}
-
-name: ElectricalCalc Pro - Android APK
+name: ElectricalCalc Pro APK Build
 
 on:
   push:
@@ -111,63 +12,14 @@ permissions:
 
 jobs:
   build:
-    name: Extract, Test and Build APK
+    name: Extract and Build Android APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Find and Extract ZIP
-        id: project
-        shell: bash
-        run: |
-          set -e
-
-          python3 - <<'PY'
-          import os
-          import zipfile
-          from pathlib import Path
-
-          files = []
-          for p in Path(".").rglob("*"):
-              if not p.is_file():
-                  continue
-              if ".git" in p.parts:
-                  continue
-              if zipfile.is_zipfile(p):
-                  files.append(p)
-
-          preferred = [
-              p for p in files
-              if "nov-21" in p.name.lower()
-          ]
-
-          candidates = preferred if preferred else files
-
-          if not candidates:
-              raise SystemExit("ERROR: No valid ZIP found in repository")
-
-
-name: ElectricalCalc Pro - Build APK
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Extract Android Project ZIP
+      - name: Find Project ZIP
         id: project
         shell: bash
         run: |
@@ -177,7 +29,7 @@ jobs:
             -not -path './.git/*' | head -n 1)
 
           if [ -z "$ZIP" ]; then
-            ZIP=$(find . -type f -iname 'electricalc-pro*.zip' \
+            ZIP=$(find . -type f -iname '*.zip' \
               -not -path './.git/*' | head -n 1)
           fi
 
@@ -186,112 +38,38 @@ jobs:
             exit 1
           fi
 
-          echo "ZIP: $ZIP"
+          echo "Selected: $ZIP"
 
-          DEST="$RUNNER_TEMP/electricalcalc"
-          mkdir -p "$DEST"
-          unzip -q "$ZIP" -d "$DEST"
+          python3 - "$ZIP" "$RUNNER_TEMP/eicalc" <<'PY'
+          import sys, zipfile, pathlib
 
-          PROJECT=$(find "$DEST" -type f \
-            -name settings.gradle.kts \
-            -not -path '*/.gradle/*' | head -n 1)
+          archive = zipfile.ZipFile(sys.argv[1])
+          dest = pathlib.Path(sys.argv[2])
+          archive.extractall(dest)
 
-          if [ -z "$PROJECT" ]; then
-            PROJECT=$(find "$DEST" -type f \
-              -name settings.gradle \
-              -not -path '*/.gradle/*' | head -n 1)
-          fi
+          projects = []
+          for p in dest.rglob("settings.gradle.kts"):
+              if (p.parent / "app/build.gradle.kts").exists():
+                  projects.append(p.parent)
 
-          if [ -z "$PROJECT" ]; then
-            echo "::error::settings.gradle file not found"
-            exit 1
-          fi
+          for p in dest.rglob("settings.gradle"):
+              if (p.parent / "app/build.gradle").exists():
+                  projects.append(p.parent)
 
-          DIR=$(dirname "$PROJECT")
+          if not projects:
+              raise SystemExit("Android Gradle project not found")
 
-          if [ ! -f "$DIR/app/build.gradle.kts" ] && \
-             [ ! -f "$DIR/app/build.gradle" ]; then
-            echo "::error::Android app module not found"
-            exit 1
-          fi
+          project = projects[0].resolve()
+          with open(
+              pathlib.Path(sys.argv[2]).parent / "project_path.txt", "w"
+          ) as f:
+              f.write(str(project))
 
-          echo "project_dir=$DIR" >> "$GITHUB_OUTPUT"
-          echo "Android project: $DIR"
+          print("Project:", project)
+          PY
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Setup Gradle 9.3.1
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.3.1'
-
-      - name: Install Android SDK 36.1
-        shell: bash
-        run: |
-          set -e
-
-
-name: ElectricalCalc Pro APK Builder
-
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-jobs:
-  build:
-    name: Build ElectricalCalc Pro
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Find and Extract Project ZIP
-        id: project
-        shell: bash
-        run: |
-          set -e
-
-          ZIP=$(find . -maxdepth 2 -type f \
-            -iname '*nov-21*.zip' | head -n 1)
-
-          if [ -z "$ZIP" ]; then
-            ZIP=$(find . -maxdepth 2 -type f \
-              -iname '*.zip' | sort | tail -n 1)
-          fi
-
-          if [ -z "$ZIP" ]; then
-            echo "::error::Project ZIP not found"
-            exit 1
-          fi
-
-          echo "ZIP selected: $ZIP"
-
-          mkdir -p "$RUNNER_TEMP/project"
-          unzip -q "$ZIP" -d "$RUNNER_TEMP/project"
-
-          DIR="$RUNNER_TEMP/project"
-
-          if [ ! -f "$DIR/settings.gradle.kts" ]; then
-            echo "::error::settings.gradle.kts missing"
-            exit 1
-          fi
-
-          if [ ! -f "$DIR/app/build.gradle.kts" ]; then
-            echo "::error::app/build.gradle.kts missing"
-            exit 1
-          fi
-
-          echo "project_dir=$DIR" >> "$GITHUB_OUTPUT"
+          PROJECT=$(cat "$RUNNER_TEMP/project_path.txt")
+          echo "project_dir=$PROJECT" >> "$GITHUB_OUTPUT"
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -299,41 +77,41 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Gradle 9.3.1
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.3.1'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android Licenses
+        shell: bash
+        run: |
+          set +o pipefail
+          yes | sdkmanager --licenses || true
 
       - name: Install Android SDK
         run: |
-          set -e
-
-          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
-            -name sdkmanager -type f | head -n 1)
-
-          if [ -z "$SDKMANAGER" ]; then
-            echo "::error::SDK Manager not found"
-            exit 1
-          fi
-
-          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
-            --install \
+          sdkmanager \
             "platform-tools" \
-            "platforms;android-36" \
+            "platforms;android-36.1" \
             "build-tools;36.0.0"
 
-      - name: Create Debug Keystore
+      - name: Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Prepare Debug Keystore
         working-directory: ${{ steps.project.outputs.project_dir }}
         run: |
-          keytool -genkeypair -v \
-            -keystore debug.keystore \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+          if [ ! -f debug.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
 
       - name: Run Unit Tests
         continue-on-error: true
@@ -342,7 +120,7 @@ jobs:
           gradle :app:testDebugUnitTest \
             --no-daemon --stacktrace
 
-      - name: Build APK
+      - name: Build Debug APK
         working-directory: ${{ steps.project.outputs.project_dir }}
         run: |
           gradle :app:assembleDebug \
@@ -361,3 +139,4 @@ jobs:
           path: ${{ steps.project.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
+

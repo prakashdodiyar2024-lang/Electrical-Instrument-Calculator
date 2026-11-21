@@ -1,4 +1,5 @@
 
+
 name: ElectricalCalc Pro APK Build
 
 on:
@@ -24,7 +25,6 @@ jobs:
         shell: bash
         run: |
           set -e
-
           ZIP_FILE="electricalc-pro-nov-20-2026-10-11-08-pm.zip"
           PROJECT_DIR="$RUNNER_TEMP/electricalcalc-project"
 
@@ -48,35 +48,18 @@ jobs:
           java-version: '21'
 
       - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Required SDK Packages
         shell: bash
         run: |
           set -e
-
-          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          export ANDROID_SDK_ROOT="$ANDROID_HOME"
-
-          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
-
-          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
-            -type f -name sdkmanager | head -n 1)
-
-          if [ -z "$SDKMANAGER" ]; then
-            echo "::error::SDK Manager not found"
-            exit 1
-          fi
-
-          echo "Using SDK Manager: $SDKMANAGER"
-
-          yes | "$SDKMANAGER" \
-            --sdk_root="$ANDROID_HOME" --licenses || true
-
-          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
+          sdkmanager --install \
             "platform-tools" \
-            "platforms;android-36-ext1" \
+            "platforms;android-36" \
             "build-tools;36.0.0"
 
-          echo "Android SDK installation completed"
+          yes | sdkmanager --licenses
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4

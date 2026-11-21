@@ -1,5 +1,5 @@
 
-name: ElectricalCalc Pro APK Build
+name: ElectricalCalc Pro - Final APK Build
 
 on:
   push:
@@ -12,64 +12,64 @@ permissions:
 
 jobs:
   build:
-    name: Extract and Build Android APK
+    name: Extract, Test and Build APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Find Project ZIP
+      - name: Find and Extract ZIP
         id: project
         shell: bash
         run: |
           set -e
 
-          ZIP=$(find . -type f -iname '*nov-21*.zip' \
+          ZIP=$(find . -maxdepth 2 -type f \
+            -iname '*nov-21*.zip' \
             -not -path './.git/*' | head -n 1)
 
           if [ -z "$ZIP" ]; then
-            ZIP=$(find . -type f -iname '*.zip' \
-              -not -path './.git/*' | head -n 1)
+            ZIP=$(find . -maxdepth 2 -type f \
+              -iname 'electricalc-pro*.zip' \
+              -not -path './.git/*' | sort | tail -n 1)
           fi
 
           if [ -z "$ZIP" ]; then
-            echo "::error::Project ZIP not found"
+            echo "::error::ElectricalCalc Pro ZIP not found"
             exit 1
           fi
 
-          echo "Selected: $ZIP"
+          echo "Selected ZIP: $ZIP"
 
-          python3 - "$ZIP" "$RUNNER_TEMP/eicalc" <<'PY'
-          import sys, zipfile, pathlib
+          DEST="$RUNNER_TEMP/electricalcalc"
+          mkdir -p "$DEST"
 
-          archive = zipfile.ZipFile(sys.argv[1])
-          dest = pathlib.Path(sys.argv[2])
-          archive.extractall(dest)
+          unzip -q "$ZIP" -d "$DEST"
 
-          projects = []
-          for p in dest.rglob("settings.gradle.kts"):
-              if (p.parent / "app/build.gradle.kts").exists():
-                  projects.append(p.parent)
+          PROJECT=""
 
-          for p in dest.rglob("settings.gradle"):
-              if (p.parent / "app/build.gradle").exists():
-                  projects.append(p.parent)
+          while IFS= read -r SETTINGS; do
+            DIR=$(dirname "$SETTINGS")
 
-          if not projects:
-              raise SystemExit("Android Gradle project not found")
+            if [ -f "$DIR/app/build.gradle.kts" ] || \
+               [ -f "$DIR/app/build.gradle" ]; then
+              PROJECT="$DIR"
+              break
+            fi
+          done < <(find "$DEST" -type f \
+            \( -name settings.gradle.kts \
+            -o -name settings.gradle \))
 
-          project = projects[0].resolve()
-          with open(
-              pathlib.Path(sys.argv[2]).parent / "project_path.txt", "w"
-          ) as f:
-              f.write(str(project))
+          if [ -z "$PROJECT" ]; then
+            echo "::error::Android Gradle project not found"
+            exit 1
+          fi
 
-          print("Project:", project)
-          PY
-
-          PROJECT=$(cat "$RUNNER_TEMP/project_path.txt")
+          echo "Android project found: $PROJECT"
           echo "project_dir=$PROJECT" >> "$GITHUB_OUTPUT"
+
+          ls -la "$PROJECT"
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -77,28 +77,27 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android Licenses
-        shell: bash
-        run: |
-          set +o pipefail
-          yes | sdkmanager --licenses || true
-
-      - name: Install Android SDK
-        run: |
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-36.1" \
-            "build-tools;36.0.0"
+      - name: Setup Android SDK 22.0
+        uses: android-actions/setup-android@v4
+        with:
+          cmdline-tools-version: 15859902
+          packages: 'platform-tools platforms;android-36.1 build-tools;36.1.0'
 
       - name: Setup Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: Prepare Debug Keystore
+      - name: Verify Build Environment
+        run: |
+          java -version
+          gradle --version
+          sdkmanager --version
+
+          test -d "$ANDROID_HOME/platforms/android-36.1"
+          test -d "$ANDROID_HOME/build-tools/36.1.0"
+
+      - name: Create Debug Keystore
         working-directory: ${{ steps.project.outputs.project_dir }}
         run: |
           if [ ! -f debug.keystore ]; then
@@ -113,30 +112,58 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
+      - name: Verify Gradle Files
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        run: |
+          test -f settings.gradle.kts || \
+          test -f settings.gradle
+
+          test -f app/build.gradle.kts || \
+          test -f app/build.gradle
+
+          echo "Gradle project verified"
+
       - name: Run Unit Tests
+        id: tests
         continue-on-error: true
         working-directory: ${{ steps.project.outputs.project_dir }}
         run: |
           gradle :app:testDebugUnitTest \
-            --no-daemon --stacktrace
+            --no-daemon \
+            --no-configuration-cache \
+            --stacktrace
 
       - name: Build Debug APK
         working-directory: ${{ steps.project.outputs.project_dir }}
         run: |
           gradle :app:assembleDebug \
-            --no-daemon --stacktrace
+            --no-daemon \
+            --no-configuration-cache \
+            --stacktrace
 
       - name: Verify APK
         working-directory: ${{ steps.project.outputs.project_dir }}
         run: |
-          test -f app/build/outputs/apk/debug/app-debug.apk
-          ls -lh app/build/outputs/apk/debug/app-debug.apk
+          APK="app/build/outputs/apk/debug/app-debug.apk"
 
-      - name: Upload APK
+          if [ ! -f "$APK" ]; then
+            echo "::error::APK file not found"
+            exit 1
+          fi
+
+          echo "APK successfully generated"
+          ls -lh "$APK"
+
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ElectricalCalc-Pro-APK
+          name: ElectricalCalc-Pro-100-Calculators-APK
           path: ${{ steps.project.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
 
+      - name: Show Test Result
+        if: always()
+        run: |
+          echo "Unit Test Result: ${{ steps.tests.outcome }}"
+          echo "APK Build completed separately"

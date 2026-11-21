@@ -1,5 +1,6 @@
 
 
+
 name: ElectricalCalc Pro APK Build
 
 on:
@@ -20,23 +21,32 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Extract Updated Android ZIP
+      - name: Extract Android ZIP
         id: project
         shell: bash
         run: |
           set -e
-          ZIP_FILE="electricalc-pro-nov-20-2026-10-11-08-pm.zip"
-          PROJECT_DIR="$RUNNER_TEMP/electricalcalc-project"
 
-          if [ ! -f "$ZIP_FILE" ]; then
-            echo "::error::Updated ZIP not found"
+          ZIP_FILE="electricalc-pro-nov-20-2026-10-11-08-pm.zip"
+          EXTRACT_DIR="$RUNNER_TEMP/electricalcalc"
+
+          test -f "$ZIP_FILE" || {
+            echo "::error::Updated ZIP file not found"
+            exit 1
+          }
+
+          mkdir -p "$EXTRACT_DIR"
+          unzip -q "$ZIP_FILE" -d "$EXTRACT_DIR"
+
+          PROJECT_DIR=$(find "$EXTRACT_DIR" \
+            -name settings.gradle.kts \
+            -type f -printf '%h\n' | head -n 1)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "::error::Android project not found"
             exit 1
           fi
 
-          mkdir -p "$PROJECT_DIR"
-          unzip -q "$ZIP_FILE" -d "$PROJECT_DIR"
-
-          test -f "$PROJECT_DIR/settings.gradle.kts"
           test -f "$PROJECT_DIR/app/build.gradle.kts"
 
           echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
@@ -45,67 +55,76 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '17'
 
-      - name: Install Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Required SDK Packages
+      - name: Configure Android SDK
         shell: bash
         run: |
           set -e
-          sdkmanager --install \
+
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+
+          SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" \
+            -type f -name sdkmanager 2>/dev/null \
+            | sort -V | tail -n 1)
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "::error::Android SDK Manager not found"
+            exit 1
+          fi
+
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+
+          echo "Android SDK Manager found"
+
+          set +o pipefail
+          yes | "$SDKMANAGER" \
+            --sdk_root="$SDK_ROOT" --licenses >/dev/null
+          set -o pipefail
+
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" \
+            --install \
             "platform-tools" \
-            "platforms;android-36" \
-            "build-tools;36.0.0"
+            "platforms;android-36"
 
-          yes | sdkmanager --licenses
+      - name: Verify Android SDK
+        shell: bash
+        run: |
+          set -e
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.3.1'
+          test -d "$ANDROID_HOME/platform-tools"
+          test -d "$ANDROID_HOME/platforms/android-36"
 
-      - name: Prepare Debug Keystore and Wrapper
+          echo "Android SDK verification successful"
+
+      - name: Build Updated APK
         shell: bash
         working-directory: ${{ steps.project.outputs.project_dir }}
         run: |
           set -e
 
-          if [ ! -f debug.keystore ]; then
-            keytool -genkeypair -v \
-              -keystore debug.keystore \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
+          if [ ! -f gradlew ]; then
+            echo "::error::Gradle wrapper missing in ZIP"
+            exit 1
           fi
 
-          if [ ! -f gradlew ] || \
-             [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
-            gradle wrapper \
-              --gradle-version 9.3.1 \
-              --distribution-type bin \
-              --no-daemon
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "::error::Gradle wrapper JAR missing"
+            exit 1
           fi
 
           chmod +x gradlew
-          ./gradlew --version
-
-      - name: Build Debug APK
-        shell: bash
-        working-directory: ${{ steps.project.outputs.project_dir }}
-        run: |
-          set -e
 
           ./gradlew :app:assembleDebug \
             --no-daemon \
             --stacktrace
 
-          test -f app/build/outputs/apk/debug/app-debug.apk
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+
+          test -f "$APK"
 
           echo "APK BUILD SUCCESSFUL"
 
@@ -116,4 +135,3 @@ jobs:
           path: ${{ steps.project.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
-

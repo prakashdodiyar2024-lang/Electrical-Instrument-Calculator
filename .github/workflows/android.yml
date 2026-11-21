@@ -1,5 +1,4 @@
 
-
 name: ElectricalCalc Pro APK Build
 
 on:
@@ -31,22 +30,14 @@ jobs:
 
           if [ ! -f "$ZIP_FILE" ]; then
             echo "::error::Updated ZIP not found"
-            ls -lah
             exit 1
           fi
 
           mkdir -p "$PROJECT_DIR"
           unzip -q "$ZIP_FILE" -d "$PROJECT_DIR"
 
-          if [ ! -f "$PROJECT_DIR/settings.gradle.kts" ]; then
-            echo "::error::settings.gradle.kts missing"
-            exit 1
-          fi
-
-          if [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
-            echo "::error::app/build.gradle.kts missing"
-            exit 1
-          fi
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          test -f "$PROJECT_DIR/app/build.gradle.kts"
 
           echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
@@ -71,11 +62,9 @@ jobs:
             -type f -name sdkmanager | head -n 1)
 
           if [ -z "$SDKMANAGER" ]; then
-            echo "::error::Android SDK Manager not found"
+            echo "::error::SDK Manager not found"
             exit 1
           fi
-
-          chmod +x "$SDKMANAGER"
 
           echo "Using SDK Manager: $SDKMANAGER"
 
@@ -84,10 +73,10 @@ jobs:
 
           "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
             "platform-tools" \
-            "platforms;android-36" \
+            "platforms;android-36-ext1" \
             "build-tools;36.0.0"
 
-          echo "Android SDK installed successfully"
+          echo "Android SDK installation completed"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -121,7 +110,6 @@ jobs:
           fi
 
           chmod +x gradlew
-
           ./gradlew --version
 
       - name: Build Debug APK
@@ -145,3 +133,4 @@ jobs:
           path: ${{ steps.project.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
+

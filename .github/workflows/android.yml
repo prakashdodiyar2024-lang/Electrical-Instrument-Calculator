@@ -97,7 +97,132 @@ jobs:
 
       - name: Prepare Debug Keystore
         working-directory: ${{ steps.project.outputs.project_dir }}
+
+name: ElectricalCalc Pro - Android APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Extract, Test and Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Find and Extract ZIP
+        id: project
+        shell: bash
         run: |
+          set -e
+
+          python3 - <<'PY'
+          import os
+          import zipfile
+          from pathlib import Path
+
+          files = []
+          for p in Path(".").rglob("*"):
+              if not p.is_file():
+                  continue
+              if ".git" in p.parts:
+                  continue
+              if zipfile.is_zipfile(p):
+                  files.append(p)
+
+          preferred = [
+              p for p in files
+              if "nov-21" in p.name.lower()
+          ]
+
+          candidates = preferred if preferred else files
+
+          if not candidates:
+              raise SystemExit("ERROR: No valid ZIP found in repository")
+
+          candidates.sort(key=lambda p: str(p))
+          selected = candidates[-1]
+
+          print("Selected ZIP:", selected)
+
+          output = Path(os.environ["RUNNER_TEMP"]) / "electricalcalc"
+          output.mkdir(parents=True, exist_ok=True)
+
+          with zipfile.ZipFile(selected) as z:
+              bad = z.testzip()
+              if bad:
+                  raise SystemExit("Corrupt ZIP entry: " + bad)
+              z.extractall(output)
+
+          projects = []
+          for settings in output.rglob("settings.gradle.kts"):
+              if (settings.parent / "app" / "build.gradle.kts").exists() or \
+                 (settings.parent / "app" / "build.gradle").exists():
+                  projects.append(settings.parent)
+
+          for settings in output.rglob("settings.gradle"):
+              if (settings.parent / "app" / "build.gradle.kts").exists() or \
+                 (settings.parent / "app" / "build.gradle").exists():
+                  projects.append(settings.parent)
+
+          if not projects:
+              raise SystemExit(
+                  "ERROR: Android Gradle project not found inside ZIP"
+              )
+
+          project = projects[0].resolve()
+          print("ANDROID_PROJECT=" + str(project))
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("project_dir=" + str(project) + "\n")
+          PY
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK Packages
+        shell: bash
+        run: |
+          set -e
+
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
+            -type f -name sdkmanager | head -n 1)
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "::error::Android sdkmanager not found"
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" \
+            --sdk_root="$ANDROID_HOME" --licenses || true
+
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
+            --install \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+
+      - name: Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Prepare Debug Keystore
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        run: |
+          set -e
+
           if [ ! -f debug.keystore ]; then
             keytool -genkeypair -v \
               -keystore debug.keystore \
@@ -109,6 +234,13 @@ jobs:
               -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
+
+      - name: Check Gradle Project
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        run: |
+          test -f settings.gradle.kts -o -f settings.gradle
+          test -f app/build.gradle.kts -o -f app/build.gradle
+          gradle --version
 
       - name: Run Unit Tests
         working-directory: ${{ steps.project.outputs.project_dir }}
@@ -128,16 +260,16 @@ jobs:
           APK="app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK" ]; then
-            echo "::error::APK file not generated"
+            echo "::error::APK was not generated"
             exit 1
           fi
 
           ls -lh "$APK"
 
-      - name: Upload APK Artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ElectricalCalc-Pro-100-Calculators-APK
+          name: ElectricalCalc-Pro-APK
           path: ${{ steps.project.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
